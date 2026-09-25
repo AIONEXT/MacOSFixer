@@ -1,6 +1,7 @@
 # MacOSFixer Makefile
 
-.PHONY: build test run clean install uninstall release lint format
+.PHONY: build test run clean install uninstall release lint format \
+	bump-version sign notarize dmg-release
 
 # Build configuration
 BUILD_CONFIG = release
@@ -8,11 +9,22 @@ TARGET = macosfixer
 BUILD_DIR = .build/$(BUILD_CONFIG)
 BINARY = $(BUILD_DIR)/$(TARGET)
 
+# Version: single source of truth is VERSION (see `make bump-version`)
+VERSION = $(shell python3 Version.py)
+DMG_NAME = MacOSFixer-1.0.0.dmg
+
 # Swift configuration
 SWIFT = swift
 # --disable-sandbox: required when building in sandboxes/CI containers where sandbox-exec is unavailable
 SWIFTFLAGS = -c $(BUILD_CONFIG) --disable-sandbox
 PACKAGE = Package.swift
+
+# Code signing identity (empty = ad-hoc). Set to your Developer ID:
+#   make SIGN_ID="Developer ID Application: Your Name (TEAM_ID)" sign
+SIGN_ID ?= -
+# Apple ID for notarization (make NOTARY_EMAIL=... overrides)
+NOTARY_EMAIL ?=
+APP_PASSWORD ?=
 
 # Default target
 all: build
@@ -124,14 +136,45 @@ app-bundle: release
 # Create DMG installer
 dmg: app-bundle
 	@echo "💿 Creating DMG..."
-	@rm -rf dmg-staging MacOSFixer-1.0.0.dmg
+	@rm -rf dmg-staging $(DMG_NAME)
 	@mkdir dmg-staging
 	@cp -R MacOSFixer.app dmg-staging/
 	@ln -s /Applications dmg-staging/Applications
 	@cp README.md LICENSE dmg-staging/
-	hdiutil create -volname "MacOSFixer" -srcfolder dmg-staging -ov -format UDZO -imagekey zlib-level=9 MacOSFixer-1.0.0.dmg
+	hdiutil create -volname "MacOSFixer" -srcfolder dmg-staging -ov -format UDZO -imagekey zlib-level=9 $(DMG_NAME)
 	@rm -rf dmg-staging
-	@echo "✅ DMG created: MacOSFixer-1.0.0.dmg"
+	@echo "✅ DMG created: $(DMG_NAME)"
+
+# Bump version: `make bump-version VERSION=patch|minor|major` or `make bump-version VERSION=1.2.3`
+# Pass the new version via the VERSION variable (avoids phony-target conflicts).
+bump-version:
+	@python3 Version.py $(VERSION)
+
+# Sign the app bundle with a Developer ID (or ad-hoc with no SIGN_ID)
+sign: app-bundle
+	@echo "✍️ Signing MacOSFixer.app with '$(SIGN_ID)'..."
+	codesign --force --deep --sign "$(SIGN_ID)" \
+		--options runtime \
+		--timestamp \
+		MacOSFixer.app
+	@codesign --verify --deep --strict --verbose=2 MacOSFixer.app
+	@echo "✅ Signed & verified"
+
+# Notarize the DMG and staple the ticket (requires Apple Developer account)
+notarize: dmg
+	@echo "📤 Submitting $(DMG_NAME) for notarization..."
+	xcrun notarytool submit $(DMG_NAME) \
+		--apple-id "$(NOTARY_EMAIL)" \
+		--team-id "$(TEAM_ID)" \
+		--password "$(APP_PASSWORD)" \
+		--wait
+	@echo "📌 Stapling notarization ticket..."
+	xcrun stapler staple MacOSFixer.app
+	@echo "✅ Notarized & stapled"
+
+# Full release pipeline: build -> sign -> notarize -> DMG
+dmg-release: sign notarize
+	@echo "🎉 Release complete: $(DMG_NAME)"
 
 # Generate Xcode project
 xcode:
@@ -175,6 +218,10 @@ help:
 	@echo "  universal      Create universal binary"
 	@echo "  app-bundle     Create .app bundle"
 	@echo "  dmg            Create DMG installer"
+		echo "  bump-version   Bump version (patch|minor|major or x.y.z)"
+		echo "  sign           Sign app bundle with Developer ID"
+		echo "  notarize       Notarize DMG and staple ticket"
+		echo "  dmg-release    Full pipeline: sign + notarize"
 	@echo "  xcode          Generate Xcode project"
 	@echo "  update         Update dependencies"
 	@echo "  resolve        Resolve dependencies"
