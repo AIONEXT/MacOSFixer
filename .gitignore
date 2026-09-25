@@ -1,0 +1,9 @@
+.build/
+.build-archive/
+.build-r/
+*.dmg
+dmg-staging/
+MacOSFixer.app/
+coverage.lcov
+.DS_Store
+.swiftpm/
