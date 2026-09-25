@@ -100,7 +100,7 @@ Real-time interactive dashboard at `http://localhost:8080` with:
 
 ### From Source
 ```bash
-git clone https://github.com/yourusername/MacOSFixer.git
+git clone https://github.com/AIONEXT/MacOSFixer.git
 cd MacOSFixer
 make build
 make install  # Optional: installs to /usr/local/bin
